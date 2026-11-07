@@ -1,0 +1,1399 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   CAMPUS OS - GESTOR UNIVERSITARIO & SEMESTRES
+   Plugin para Obsidian creado por Nelxson2099
+   - Universidad y Semestre personalizables
+   - Materias con colores y metadata (código, profesor, aula)
+   - Tareas tachables interactivas con estados de urgencia y calificaciones
+   - Exportación profesional del Semestre completo a nota Markdown
+   - Botón de reinicio seguro de ciclo con archivado histórico
+   ══════════════════════════════════════════════════════════════════════════ */
+
+'use strict';
+
+const obsidian = require('obsidian');
+const { Plugin, ItemView, Modal, Notice, Setting, PluginSettingTab } = obsidian;
+
+const VIEW_TYPE_UNIVERSITY = 'campus-os-university-view';
+
+const COLOR_PALETTE = [
+  { id: 'indigo', name: 'Índigo', hex: '#6366f1' },
+  { id: 'emerald', name: 'Esmeralda', hex: '#10b981' },
+  { id: 'violet', name: 'Violeta', hex: '#8b5cf6' },
+  { id: 'amber', name: 'Ámbar', hex: '#f59e0b' },
+  { id: 'cyan', name: 'Cian', hex: '#06b6d4' },
+  { id: 'pink', name: 'Rosa', hex: '#ec4899' },
+  { id: 'rose', name: 'Rojo Carmesí', hex: '#f43f5e' },
+  { id: 'teal', name: 'Turquesa', hex: '#14b8a6' },
+  { id: 'blue', name: 'Azul Real', hex: '#3b82f6' }
+];
+
+// ─── i18n LOCALIZATION ENGINE (EN / ES) ───
+const USER_LOCALE = (typeof window !== 'undefined' && window.localStorage && window.localStorage.getItem('language') || 'en').toLowerCase();
+const IS_ES = USER_LOCALE.startsWith('es');
+
+const I18N = {
+  en: {
+    ribbonTitle: 'Campus OS - University Dashboard',
+    openCommand: 'Open Campus OS Dashboard',
+    exportCommand: 'Export Current Semester to Markdown',
+    newSubjectBtn: '+ New Subject',
+    exportSemesterBtn: '📄 Export Semester',
+    newSemesterBtn: '🔄 New Semester',
+    semesterProgress: 'Semester Progress: {completed} of {total} tasks completed',
+    statEnrolled: 'ENROLLED SUBJECTS',
+    statCompleted: 'COMPLETED TASKS',
+    statPending: 'PENDING',
+    searchPlaceholder: 'Search subject or task...',
+    filterAll: 'All',
+    filterPending: 'Pending',
+    filterCompleted: 'Completed',
+    noSubjects: 'No subjects added yet. Click "+ New Subject" to begin!',
+    addTask: '+ Add Task',
+    editSubject: 'Edit Subject',
+    deleteSubject: 'Delete Subject',
+    saveBtn: 'Save',
+    cancelBtn: 'Cancel',
+    settingsTitle: 'Campus OS Settings',
+    univNameLabel: 'University / Institution Name',
+    univNameDesc: 'Full name of your university, academy, or institute.',
+    shortNameLabel: 'Acronym / Short Name',
+    shortNameDesc: 'Short abbreviation (e.g. MIT, Stanford, Harvard, UCV).',
+    careerLabel: 'Degree / Program',
+    careerDesc: 'Name of your major, career, or specialization.',
+    semesterLabel: 'Current Semester / Period',
+    academicYearLabel: 'Academic Year',
+    exportFolderLabel: 'Export Folder'
+  },
+  es: {
+    ribbonTitle: 'Campus OS - Gestor Universitario',
+    openCommand: 'Abrir Dashboard de Campus OS',
+    exportCommand: 'Exportar Semestre Actual a Markdown',
+    newSubjectBtn: '+ Nueva Materia',
+    exportSemesterBtn: '📄 Exportar Semestre',
+    newSemesterBtn: '🔄 Nuevo Semestre',
+    semesterProgress: 'Avance del Semestre: {completed} de {total} tareas listas',
+    statEnrolled: 'MATERIAS CURSADAS',
+    statCompleted: 'TAREAS COMPLETADAS',
+    statPending: 'PENDIENTES',
+    searchPlaceholder: 'Buscar materia o tarea...',
+    filterAll: 'Todas',
+    filterPending: 'Pendientes',
+    filterCompleted: 'Completadas',
+    noSubjects: 'Aún no tienes materias agregadas. ¡Haz clic en "+ Nueva Materia" para comenzar!',
+    addTask: '+ Agregar Tarea',
+    editSubject: 'Editar Materia',
+    deleteSubject: 'Eliminar Materia',
+    saveBtn: 'Guardar',
+    cancelBtn: 'Cancelar',
+    settingsTitle: 'Configuración de Campus OS',
+    univNameLabel: 'Nombre de la Universidad / Institución',
+    univNameDesc: 'Nombre completo de tu casa de estudios, academia o liceo.',
+    shortNameLabel: 'Siglas o Nombre Corto',
+    shortNameDesc: 'Abreviatura (ej. MIT, Stanford, Harvard, UCV, UNAM).',
+    careerLabel: 'Carrera o Especialidad',
+    careerDesc: 'Nombre de la carrera o mención que estás cursando.',
+    semesterLabel: 'Semestre o Período Actual',
+    academicYearLabel: 'Año Académico',
+    exportFolderLabel: 'Carpeta de Exportación'
+  }
+};
+
+function t(key, vars = {}) {
+  let str = (IS_ES ? I18N.es[key] : I18N.en[key]) || I18N.en[key] || key;
+  for (const v in vars) {
+    str = str.replace(new RegExp(`\\{${v}\\}`, 'g'), vars[v]);
+  }
+  return str;
+}
+
+const DEFAULT_SETTINGS = {
+  universityName: 'Campus University',
+  shortName: 'CAMPUS',
+  career: 'Computer Science',
+  currentSemester: 'Semester 2026-I',
+  academicYear: '2026',
+  exportFolder: 'University/Semesters',
+  archiveFolder: 'University/Archive',
+  universityIcon: '🏛️',
+  subjects: [
+    {
+      id: 'sub-sample-1',
+      name: 'Algorithms & Data Structures',
+      code: 'CS-201',
+      professor: 'Prof. Turing',
+      classroom: 'Hall 4 / Virtual',
+      color: '#6366f1',
+      collapsed: false,
+      tasks: [
+        {
+          id: 'tsk-sample-1',
+          title: 'Problem Set 1 - Graph Traversal & Trees',
+          type: 'tarea',
+          dueDate: '',
+          weight: 20,
+          grade: 100,
+          completed: true,
+          completedAt: new Date().toISOString()
+        },
+        {
+          id: 'tsk-sample-2',
+          title: 'Midterm Exam - Dynamic Programming',
+          type: 'examen',
+          dueDate: getFutureDate(5),
+          weight: 30,
+          grade: null,
+          completed: false
+        }
+      ]
+    }
+  ],
+  completedSemestersArchive: []
+};
+
+// ─── UTILITY HELPERS ───
+function getFutureDate(daysAhead) {
+  const d = new Date();
+  d.setDate(d.getDate() + daysAhead);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function sanitizeFileName(name) {
+  return (name || 'Documento').replace(/[/\\?%*:|"<>]/g, '-').trim();
+}
+
+function getUrgencyInfo(dueDateStr, completed) {
+  if (completed) {
+    return { text: 'Completada', cls: 'due-normal', daysDiff: 0 };
+  }
+  if (!dueDateStr) {
+    return { text: 'Sin fecha', cls: 'due-normal', daysDiff: 999 };
+  }
+
+  const parts = dueDateStr.split('-');
+  if (parts.length !== 3) return { text: dueDateStr, cls: 'due-normal', daysDiff: 999 };
+
+  const target = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  target.setHours(0, 0, 0, 0);
+
+  const diffTime = target.getTime() - today.getTime();
+  const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+  if (diffDays < 0) {
+    return { text: `Vencida (${Math.abs(diffDays)}d)`, cls: 'due-overdue', daysDiff };
+  } else if (diffDays === 0) {
+    return { text: '¡Vence Hoy!', cls: 'due-today', daysDiff: 0 };
+  } else if (diffDays === 1) {
+    return { text: 'Vence Mañana', cls: 'due-soon', daysDiff: 1 };
+  } else if (diffDays <= 4) {
+    return { text: `En ${diffDays} días`, cls: 'due-soon', daysDiff };
+  }
+  return { text: dueDateStr, cls: 'due-normal', daysDiff };
+}
+
+function calculateMetrics(subjects) {
+  let totalTasks = 0;
+  let completedTasks = 0;
+  let totalWeight = 0;
+  let weightedGradeSum = 0;
+  let simpleGradeSum = 0;
+  let gradedCount = 0;
+
+  for (const s of subjects || []) {
+    for (const t of s.tasks || []) {
+      totalTasks++;
+      if (t.completed) completedTasks++;
+      if (typeof t.grade === 'number' && !isNaN(t.grade)) {
+        gradedCount++;
+        simpleGradeSum += t.grade;
+        if (t.weight) {
+          weightedGradeSum += (t.grade * (t.weight / 100));
+          totalWeight += t.weight;
+        }
+      }
+    }
+  }
+
+  const pendingTasks = totalTasks - completedTasks;
+  const pct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+  const avgGrade = gradedCount > 0 ? (simpleGradeSum / gradedCount).toFixed(1) : null;
+
+  return {
+    totalSubjects: (subjects || []).length,
+    totalTasks,
+    completedTasks,
+    pendingTasks,
+    pct,
+    avgGrade,
+    gradedCount
+  };
+}
+
+// ─── SVG ICONS GENERATOR ───
+function svgIcon(name) {
+  switch (name) {
+    case 'plus':
+      return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
+    case 'trash':
+      return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`;
+    case 'edit':
+      return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>`;
+    case 'export':
+      return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`;
+    case 'reset':
+      return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>`;
+    case 'chevron-down':
+      return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+    case 'chevron-right':
+      return `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+    case 'search':
+      return `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>`;
+    case 'check':
+      return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
+    default:
+      return '';
+  }
+}
+
+// ─── MARKDOWN SEMESTER EXPORT GENERATOR ───
+function buildSemesterMarkdown(settings) {
+  const metrics = calculateMetrics(settings.subjects);
+  const now = new Date();
+  const dateStr = now.toISOString().split('T')[0];
+  const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  let md = `---`;
+  md += `\ntags: [universidad, semestre, resumen-academico, campus-os]`;
+  md += `\nuniversidad: "${settings.universityName}"`;
+  md += `\ncarrera: "${settings.career}"`;
+  md += `\nsemestre: "${settings.currentSemester}"`;
+  md += `\nfecha_exportacion: "${dateStr} ${timeStr}"`;
+  md += `\nprogreso_global: ${metrics.pct}%`;
+  if (metrics.avgGrade) md += `\npromedio_estimado: ${metrics.avgGrade}`;
+  md += `\n---\n\n`;
+
+  // Hero Title
+  md += `# ${settings.universityIcon} ${settings.universityName}\n`;
+  md += `### 🎓 Resumen Académico: ${settings.currentSemester} (${settings.career})\n\n`;
+
+  // Callout Overview
+  md += `> [!INFO] **ESTADO DEL SEMESTRE**\n`;
+  md += `> - **Progreso de Tareas:** ${metrics.completedTasks} de ${metrics.totalTasks} completadas (${metrics.pct}%)\n`;
+  md += `> - **Materias Cursadas:** ${metrics.totalSubjects}\n`;
+  if (metrics.avgGrade) {
+    md += `> - **Promedio de Calificaciones:** ${metrics.avgGrade} / 20\n`;
+  }
+  md += `> - **Generado el:** ${dateStr} a las ${timeStr} mediante **Campus OS**\n\n`;
+
+  // Subjects Summary Table
+  md += `## 📊 Tabla Resumen de Materias\n\n`;
+  md += `| Materia | Código | Profesor | Tareas | Listas | Progreso |\n`;
+  md += `| :--- | :--- | :--- | :---: | :---: | :---: |\n`;
+
+  for (const sub of settings.subjects) {
+    const subTasks = sub.tasks || [];
+    const done = subTasks.filter(t => t.completed).length;
+    const subPct = subTasks.length > 0 ? Math.round((done / subTasks.length) * 100) : 0;
+    md += `| **${sub.name}** | \`${sub.code || 'N/A'}\` | ${sub.professor || 'Sin asignar'} | ${subTasks.length} | ${done} | ${subPct}% |\n`;
+  }
+  md += `\n---\n\n`;
+
+  // Detailed Subjects Section
+  md += `## 📚 Desglose Detallado por Materia y Tareas\n\n`;
+
+  for (const sub of settings.subjects) {
+    const subTasks = sub.tasks || [];
+    const done = subTasks.filter(t => t.completed).length;
+    const subPct = subTasks.length > 0 ? Math.round((done / subTasks.length) * 100) : 0;
+
+    md += `### 📌 ${sub.name} (${sub.code || 'S/C'})\n`;
+    if (sub.professor) md += `* **Profesor:** ${sub.professor}\n`;
+    if (sub.classroom) md += `* **Aula / Modalidad:** ${sub.classroom}\n`;
+    md += `* **Avance:** ${subPct}% (${done}/${subTasks.length} tareas completadas)\n\n`;
+
+    if (subTasks.length === 0) {
+      md += `_No se registraron tareas en esta materia._\n\n`;
+    } else {
+      md += `#### Checklist de Entregas y Evaluaciones:\n`;
+      for (const t of subTasks) {
+        const check = t.completed ? '[x]' : '[ ]';
+        const typeBadge = `[${(t.type || 'Tarea').toUpperCase()}]`;
+        let extra = [];
+        if (t.dueDate) extra.push(`📅 ${t.dueDate}`);
+        if (t.weight) extra.push(`Ponderación: ${t.weight}%`);
+        if (typeof t.grade === 'number') extra.push(`⭐ Nota: ${t.grade}`);
+
+        const extraStr = extra.length > 0 ? ` *(${extra.join(' • ')})*` : '';
+        md += `- ${check} **${t.title}** \`${typeBadge}\`${extraStr}\n`;
+      }
+      md += `\n`;
+    }
+  }
+
+  // Reflection / Notes Section
+  md += `---\n\n`;
+  md += `## 📝 Notas y Conclusiones del Semestre\n`;
+  md += `> [!TIP] Espacio para anotar aprendizajes clave, temas a reforzar o reflexiones antes de pasar al siguiente semestre.\n\n`;
+  md += `- [ ] Revisar inscripción para el próximo ciclo.\n`;
+  md += `- [ ] Archivar apuntes y PDFs del semestre en sus carpetas correspondientes.\n\n`;
+
+  return md;
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// CAMPUS OS MAIN VIEW (ITEMVIEW)
+// ══════════════════════════════════════════════════════════════════════════
+class CampusUniversityView extends ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.activeFilter = 'all'; // 'all', 'pending', 'completed'
+    this.searchQuery = '';
+  }
+
+  getViewType() {
+    return VIEW_TYPE_UNIVERSITY;
+  }
+
+  getDisplayText() {
+    return `${this.plugin.settings.shortName || 'Campus'} - Universidad`;
+  }
+
+  getIcon() {
+    return 'graduation-cap';
+  }
+
+  async onOpen() {
+    this.render();
+  }
+
+  render() {
+    const root = this.contentEl || (this.containerEl.children && this.containerEl.children[1]) || this.containerEl;
+    root.empty();
+    root.addClass('campus-os-view');
+    if (this.containerEl) {
+      this.containerEl.removeClass('campus-os-container');
+    }
+
+    const container = root.createDiv({ cls: 'campus-os-container' });
+
+    const settings = this.plugin.settings;
+    const metrics = calculateMetrics(settings.subjects);
+
+    // ─── 1. HERO BANNER ───
+    const banner = container.createDiv({ cls: 'campus-hero-banner' });
+
+    const heroTop = banner.createDiv({ cls: 'campus-hero-top' });
+
+    // University Title Box
+    const titleBox = heroTop.createDiv({ cls: 'campus-uni-title-box' });
+    const uniIcon = titleBox.createDiv({ cls: 'campus-uni-icon' });
+    uniIcon.setText(settings.universityIcon || '🏛️');
+    uniIcon.title = 'Haz clic para cambiar el icono';
+    uniIcon.addEventListener('click', () => {
+      new EditUniversityModal(this.app, this.plugin, () => this.render()).open();
+    });
+
+    const titles = titleBox.createDiv({ cls: 'campus-uni-titles' });
+    const nameWrapper = titles.createDiv({ cls: 'campus-uni-name-wrapper' });
+
+    const uniName = nameWrapper.createEl('h1', { cls: 'campus-uni-name' });
+    uniName.setText(settings.universityName || 'Mi Universidad');
+
+    const editBtn = nameWrapper.createEl('button', { cls: 'campus-edit-uni-btn' });
+    editBtn.innerHTML = svgIcon('edit');
+    editBtn.title = 'Editar datos de la universidad y semestre';
+    editBtn.addEventListener('click', () => {
+      new EditUniversityModal(this.app, this.plugin, () => this.render()).open();
+    });
+
+    // Pills
+    const pills = titles.createDiv({ cls: 'campus-meta-pills' });
+    const pSem = pills.createDiv({ cls: 'campus-pill pill-semester' });
+    pSem.setText(`📌 ${settings.currentSemester}`);
+
+    const pCar = pills.createDiv({ cls: 'campus-pill pill-career' });
+    pCar.setText(`🎓 ${settings.career}`);
+
+    // Actions
+    const actions = heroTop.createDiv({ cls: 'campus-hero-actions' });
+
+    const addSubBtn = actions.createEl('button', { cls: 'campus-btn campus-btn-primary' });
+    addSubBtn.innerHTML = `${svgIcon('plus')} <span>${t('newSubjectBtn')}</span>`;
+    addSubBtn.addEventListener('click', () => {
+      new SubjectModal(this.app, this.plugin, null, () => this.render()).open();
+    });
+
+    const exportBtn = actions.createEl('button', { cls: 'campus-btn campus-btn-export' });
+    exportBtn.innerHTML = `${svgIcon('export')} <span>${t('exportSemesterBtn')}</span>`;
+    exportBtn.title = 'Genera un documento Markdown completo en tu Vault con todas las materias y tareas';
+    exportBtn.addEventListener('click', async () => {
+      await this.plugin.exportSemesterToVault();
+    });
+
+    const resetBtn = actions.createEl('button', { cls: 'campus-btn campus-btn-reset' });
+    resetBtn.innerHTML = `${svgIcon('reset')} <span>${t('newSemesterBtn')}</span>`;
+    resetBtn.title = 'Reiniciar ciclo para cuando pasas de semestre (con respaldo automático)';
+    resetBtn.addEventListener('click', () => {
+      new ResetSemesterModal(this.app, this.plugin, () => this.render()).open();
+    });
+
+    // Progress & Global Stats
+    const heroStats = banner.createDiv({ cls: 'campus-hero-stats' });
+    const progHeader = heroStats.createDiv({ cls: 'campus-progress-header' });
+    progHeader.createSpan({ text: t('semesterProgress', { completed: metrics.completedTasks, total: metrics.totalTasks }) });
+    progHeader.createSpan({ cls: 'campus-progress-pct', text: `${metrics.pct}%` });
+
+    const track = heroStats.createDiv({ cls: 'campus-progress-bar-track' });
+    const fill = track.createDiv({ cls: 'campus-progress-bar-fill' });
+    fill.style.width = `${metrics.pct}%`;
+
+    const statsGrid = heroStats.createDiv({ cls: 'campus-stats-grid' });
+
+    const stat1 = statsGrid.createDiv({ cls: 'campus-stat-card' });
+    stat1.createDiv({ cls: 'campus-stat-val', text: String(metrics.totalSubjects) });
+    stat1.createDiv({ cls: 'campus-stat-label', text: t('statEnrolled') });
+
+    const stat2 = statsGrid.createDiv({ cls: 'campus-stat-card' });
+    stat2.createDiv({ cls: 'campus-stat-val', text: String(metrics.completedTasks) });
+    stat2.createDiv({ cls: 'campus-stat-label', text: t('statCompleted') });
+
+    const stat3 = statsGrid.createDiv({ cls: 'campus-stat-card' });
+    stat3.createDiv({ cls: 'campus-stat-val', text: String(metrics.pendingTasks) });
+    stat3.createDiv({ cls: 'campus-stat-label', text: t('statPending') });
+
+    if (metrics.avgGrade) {
+      const stat4 = statsGrid.createDiv({ cls: 'campus-stat-card' });
+      stat4.createDiv({ cls: 'campus-stat-val', text: metrics.avgGrade });
+      stat4.createDiv({ cls: 'campus-stat-label', text: 'Promedio Notas' });
+    }
+
+    // ─── 2. TOOLBAR & FILTERS ───
+    const toolbar = container.createDiv({ cls: 'campus-toolbar' });
+
+    const searchBox = toolbar.createDiv({ cls: 'campus-search-box' });
+    const sIcon = searchBox.createDiv({ cls: 'campus-search-icon' });
+    sIcon.innerHTML = svgIcon('search');
+
+    const searchInput = searchBox.createEl('input', {
+      cls: 'campus-search-input',
+      type: 'text',
+      placeholder: t('searchPlaceholder')
+    });
+    searchInput.value = this.searchQuery;
+    searchInput.addEventListener('input', (e) => {
+      this.searchQuery = e.target.value.toLowerCase().trim();
+      this.renderSubjectsList(container.querySelector('.campus-subjects-list'));
+    });
+
+    const filterGroup = toolbar.createDiv({ cls: 'campus-filter-group' });
+    const filters = [
+      { id: 'all', label: t('filterAll') },
+      { id: 'pending', label: t('filterPending') },
+      { id: 'completed', label: t('filterCompleted') }
+    ];
+
+    filters.forEach(f => {
+      const btn = filterGroup.createEl('button', {
+        cls: `campus-filter-btn ${this.activeFilter === f.id ? 'active' : ''}`,
+        text: f.label
+      });
+      btn.addEventListener('click', () => {
+        this.activeFilter = f.id;
+        filterGroup.querySelectorAll('.campus-filter-btn').forEach(b => b.removeClass('active'));
+        btn.addClass('active');
+        this.renderSubjectsList(container.querySelector('.campus-subjects-list'));
+      });
+    });
+
+    // ─── 3. SUBJECTS LIST ───
+    const subjectsContainer = container.createDiv({ cls: 'campus-subjects-list' });
+    this.renderSubjectsList(subjectsContainer);
+  }
+
+  renderSubjectsList(containerEl) {
+    if (!containerEl) return;
+    containerEl.empty();
+
+    const settings = this.plugin.settings;
+    const subjects = settings.subjects || [];
+
+    if (subjects.length === 0) {
+      const empty = containerEl.createDiv({ cls: 'campus-empty-tasks' });
+      empty.createEl('p', { text: 'No tienes materias registradas para este semestre.' });
+      const addFirstBtn = empty.createEl('button', { cls: 'campus-btn campus-btn-primary' });
+      addFirstBtn.setText('+ Añadir Primera Materia');
+      addFirstBtn.addEventListener('click', () => {
+        new SubjectModal(this.app, this.plugin, null, () => this.render()).open();
+      });
+      return;
+    }
+
+    // Filter & Search Logic
+    subjects.forEach((subject, subIndex) => {
+      let tasks = subject.tasks || [];
+
+      // Filter by status
+      if (this.activeFilter === 'pending') {
+        tasks = tasks.filter(t => !t.completed);
+      } else if (this.activeFilter === 'completed') {
+        tasks = tasks.filter(t => t.completed);
+      }
+
+      // Filter by search query
+      if (this.searchQuery) {
+        const matchSub = subject.name.toLowerCase().includes(this.searchQuery) ||
+                         (subject.code && subject.code.toLowerCase().includes(this.searchQuery));
+        if (!matchSub) {
+          tasks = tasks.filter(t => t.title.toLowerCase().includes(this.searchQuery));
+          if (tasks.length === 0) return; // skip subject if nothing matches
+        }
+      }
+
+      const allSubTasks = subject.tasks || [];
+      const doneSubTasks = allSubTasks.filter(t => t.completed).length;
+      const subPct = allSubTasks.length > 0 ? Math.round((doneSubTasks / allSubTasks.length) * 100) : 0;
+      const subColor = subject.color || '#6366f1';
+
+      const card = containerEl.createDiv({ cls: 'campus-subject-card' });
+
+      // Accent color line
+      const accent = card.createDiv({ cls: 'campus-subject-accent-bar' });
+      accent.style.background = subColor;
+
+      // Header
+      const header = card.createDiv({ cls: 'campus-subject-header' });
+
+      const info = header.createDiv({ cls: 'campus-subject-info' });
+      const dot = info.createDiv({ cls: 'campus-subject-dot' });
+      dot.style.color = subColor;
+      dot.style.backgroundColor = subColor;
+
+      const details = info.createDiv({ cls: 'campus-subject-details' });
+      const nameRow = details.createDiv({ cls: 'campus-subject-name-row' });
+      nameRow.createEl('h3', { cls: 'campus-subject-name', text: subject.name });
+
+      if (subject.code) {
+        nameRow.createEl('span', { cls: 'campus-subject-code', text: subject.code });
+      }
+
+      const subtext = details.createDiv({ cls: 'campus-subject-subtext' });
+      if (subject.professor) subtext.createSpan({ text: `👤 ${subject.professor}` });
+      if (subject.classroom) subtext.createSpan({ text: `📍 ${subject.classroom}` });
+
+      // Header Right (Progress & Actions)
+      const headerRight = header.createDiv({ cls: 'campus-subject-header-right' });
+
+      const progBox = headerRight.createDiv({ cls: 'campus-subject-progress-box' });
+      progBox.createDiv({ cls: 'campus-subject-progress-text', text: `${doneSubTasks}/${allSubTasks.length} (${subPct}%)` });
+      const miniTrack = progBox.createDiv({ cls: 'campus-subject-mini-track' });
+      const miniFill = miniTrack.createDiv({ cls: 'campus-subject-mini-fill' });
+      miniFill.style.width = `${subPct}%`;
+      miniFill.style.background = subColor;
+
+      const actions = headerRight.createDiv({ cls: 'campus-subject-actions' });
+
+      const editSubBtn = actions.createEl('button', { cls: 'campus-icon-btn' });
+      editSubBtn.innerHTML = svgIcon('edit');
+      editSubBtn.title = 'Editar datos de la materia';
+      editSubBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        new SubjectModal(this.app, this.plugin, subject, () => this.render()).open();
+      });
+
+      const delSubBtn = actions.createEl('button', { cls: 'campus-icon-btn danger' });
+      delSubBtn.innerHTML = svgIcon('trash');
+      delSubBtn.title = 'Eliminar materia';
+      delSubBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (confirm(`¿Eliminar la materia "${subject.name}" y todas sus tareas?`)) {
+          settings.subjects.splice(subIndex, 1);
+          await this.plugin.saveSettings();
+          this.render();
+          new Notice(`🗑️ Materia "${subject.name}" eliminada`);
+        }
+      });
+
+      const chevronBtn = actions.createEl('button', { cls: 'campus-icon-btn' });
+      chevronBtn.innerHTML = subject.collapsed ? svgIcon('chevron-right') : svgIcon('chevron-down');
+
+      // Toggle collapse on header click
+      header.addEventListener('click', async () => {
+        subject.collapsed = !subject.collapsed;
+        await this.plugin.saveSettings();
+        this.renderSubjectsList(containerEl);
+      });
+
+      // Body (Tasks)
+      if (!subject.collapsed) {
+        const body = card.createDiv({ cls: 'campus-subject-body' });
+
+        // Quick Add Task Bar
+        const quickAdd = body.createDiv({ cls: 'campus-quick-add-task' });
+
+        const taskInput = quickAdd.createEl('input', {
+          cls: 'campus-task-input',
+          type: 'text',
+          placeholder: `+ Nueva tarea o examen para ${subject.name}...`
+        });
+
+        const typeSelect = quickAdd.createEl('select', { cls: 'campus-task-select' });
+        ['tarea', 'examen', 'proyecto', 'exposicion', 'taller', 'otro'].forEach(t => {
+          const opt = typeSelect.createEl('option', { value: t, text: t.charAt(0).toUpperCase() + t.slice(1) });
+        });
+
+        const dateInput = quickAdd.createEl('input', { cls: 'campus-task-date-input', type: 'date' });
+
+        const addBtn = quickAdd.createEl('button', { cls: 'campus-add-task-btn', text: 'Añadir' });
+
+        const handleAddTask = async () => {
+          const title = taskInput.value.trim();
+          if (!title) {
+            new Notice('Ingresa el título de la tarea');
+            return;
+          }
+
+          const newTask = {
+            id: 'tsk-' + Date.now(),
+            title,
+            type: typeSelect.value,
+            dueDate: dateInput.value || '',
+            weight: null,
+            grade: null,
+            completed: false
+          };
+
+          if (!subject.tasks) subject.tasks = [];
+          subject.tasks.push(newTask);
+          await this.plugin.saveSettings();
+          this.render();
+          new Notice(`✅ Tarea añadida a ${subject.name}`);
+        };
+
+        addBtn.addEventListener('click', handleAddTask);
+        taskInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') handleAddTask();
+        });
+
+        // Tasks Container
+        const tasksContainer = body.createDiv({ cls: 'campus-tasks-container' });
+
+        if (tasks.length === 0) {
+          tasksContainer.createDiv({
+            cls: 'campus-empty-tasks',
+            text: allSubTasks.length === 0 ? 'Sin tareas creadas todavía. Añade la primera arriba.' : 'No hay tareas que coincidan con el filtro actual.'
+          });
+        } else {
+          tasks.forEach((task) => {
+            const taskItem = tasksContainer.createDiv({
+              cls: `campus-task-item ${task.completed ? 'completed' : ''}`
+            });
+
+            const taskLeft = taskItem.createDiv({ cls: 'campus-task-left' });
+
+            // Custom Checkbox
+            const checkbox = taskLeft.createDiv({
+              cls: `campus-checkbox-custom ${task.completed ? 'checked' : ''}`
+            });
+            checkbox.innerHTML = svgIcon('check');
+            checkbox.title = task.completed ? 'Marcar como pendiente' : 'Tachar como completada';
+
+            checkbox.addEventListener('click', async (e) => {
+              e.stopPropagation();
+              task.completed = !task.completed;
+              task.completedAt = task.completed ? new Date().toISOString() : null;
+              await this.plugin.saveSettings();
+              this.render();
+            });
+
+            // Title & Info
+            const titleGroup = taskLeft.createDiv({ cls: 'campus-task-title-group' });
+            const titleEl = titleGroup.createDiv({ cls: 'campus-task-title', text: task.title });
+
+            // Right side metadata
+            const taskRight = taskItem.createDiv({ cls: 'campus-task-right' });
+
+            // Type Badge
+            const typeBadge = taskRight.createDiv({
+              cls: `campus-badge-type type-${task.type || 'tarea'}`,
+              text: task.type || 'tarea'
+            });
+
+            // Urgency Badge
+            const urgency = getUrgencyInfo(task.dueDate, task.completed);
+            if (task.dueDate || task.completed) {
+              const dueBadge = taskRight.createDiv({
+                cls: `campus-badge-due ${urgency.cls}`,
+                text: urgency.text
+              });
+            }
+
+            // Grade / Weight Badge
+            const gradeBadge = taskRight.createDiv({
+              cls: `campus-badge-grade ${typeof task.grade === 'number' ? '' : 'no-grade'}`,
+              text: typeof task.grade === 'number'
+                ? `Nota: ${task.grade}${task.weight ? ` (${task.weight}%)` : ''}`
+                : (task.weight ? `${task.weight}%` : '+ Calificar')
+            });
+            gradeBadge.title = 'Haz clic para asignar o editar la calificación/ponderación';
+            gradeBadge.addEventListener('click', () => {
+              new GradeModal(this.app, task, async () => {
+                await this.plugin.saveSettings();
+                this.render();
+              }).open();
+            });
+
+            // Delete Task
+            const delTaskBtn = taskRight.createEl('button', { cls: 'campus-icon-btn danger' });
+            delTaskBtn.innerHTML = svgIcon('trash');
+            delTaskBtn.title = 'Eliminar tarea';
+            delTaskBtn.addEventListener('click', async () => {
+              const idx = subject.tasks.indexOf(task);
+              if (idx >= 0) {
+                subject.tasks.splice(idx, 1);
+                await this.plugin.saveSettings();
+                this.render();
+              }
+            });
+          });
+        }
+      }
+    });
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// MODALS
+// ══════════════════════════════════════════════════════════════════════════
+
+// ─── 1. EDIT UNIVERSITY & CAREER MODAL ───
+class EditUniversityModal extends Modal {
+  constructor(app, plugin, onSave) {
+    super(app);
+    this.plugin = plugin;
+    this.onSave = onSave;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass('campus-modal-content');
+
+    contentEl.createEl('h2', { cls: 'campus-modal-title', text: '🏛️ Configuración Universitaria' });
+    contentEl.createEl('p', { cls: 'campus-modal-desc', text: 'Personaliza el nombre de tu institución, carrera y período académico actual.' });
+
+    // University Icon
+    const rowIcon = contentEl.createDiv({ cls: 'campus-form-row' });
+    rowIcon.createEl('label', { cls: 'campus-form-label', text: 'Icono o Escudo' });
+    const iconInput = rowIcon.createEl('input', { cls: 'campus-form-input', type: 'text', value: this.plugin.settings.universityIcon || '🏛️' });
+
+    // University Name
+    const rowName = contentEl.createDiv({ cls: 'campus-form-row' });
+    rowName.createEl('label', { cls: 'campus-form-label', text: t('univNameLabel') });
+    const nameInput = rowName.createEl('input', {
+      cls: 'campus-form-input',
+      type: 'text',
+      placeholder: 'Ej: Campus University, Stanford, Oxford, UCV',
+      value: this.plugin.settings.universityName || ''
+    });
+
+    // Short Name
+    const rowShort = contentEl.createDiv({ cls: 'campus-form-row' });
+    rowShort.createEl('label', { cls: 'campus-form-label', text: t('shortNameLabel') });
+    const shortInput = rowShort.createEl('input', {
+      cls: 'campus-form-input',
+      type: 'text',
+      placeholder: 'Ej: CAMPUS, MIT, Harvard, UNAM',
+      value: this.plugin.settings.shortName || ''
+    });
+
+    // Career
+    const rowCareer = contentEl.createDiv({ cls: 'campus-form-row' });
+    rowCareer.createEl('label', { cls: 'campus-form-label', text: t('careerLabel') });
+    const careerInput = rowCareer.createEl('input', {
+      cls: 'campus-form-input',
+      type: 'text',
+      placeholder: 'Ej: Computer Science, Medicina, Derecho',
+      value: this.plugin.settings.career || ''
+    });
+
+    // Semester
+    const rowSem = contentEl.createDiv({ cls: 'campus-form-row' });
+    rowSem.createEl('label', { cls: 'campus-form-label', text: 'Semestre o Ciclo Actual' });
+    const semInput = rowSem.createEl('input', {
+      cls: 'campus-form-input',
+      type: 'text',
+      placeholder: 'Ej: Semestre 2026-II o Semestre V',
+      value: this.plugin.settings.currentSemester || ''
+    });
+
+    // Actions
+    const actions = contentEl.createDiv({ cls: 'campus-modal-actions' });
+    const cancelBtn = actions.createEl('button', { cls: 'campus-btn campus-btn-export', text: 'Cancelar' });
+    cancelBtn.addEventListener('click', () => this.close());
+
+    const saveBtn = actions.createEl('button', { cls: 'campus-btn campus-btn-primary', text: 'Guardar Cambios' });
+    saveBtn.addEventListener('click', async () => {
+      this.plugin.settings.universityIcon = iconInput.value.trim() || '🏛️';
+      this.plugin.settings.universityName = nameInput.value.trim() || 'Mi Universidad';
+      this.plugin.settings.shortName = shortInput.value.trim() || 'Universidad';
+      this.plugin.settings.career = careerInput.value.trim() || 'Estudiante';
+      this.plugin.settings.currentSemester = semInput.value.trim() || 'Semestre Actual';
+
+      await this.plugin.saveSettings();
+      if (this.onSave) this.onSave();
+      new Notice('✅ Datos de la Universidad actualizados');
+      this.close();
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+// ─── 2. SUBJECT MODAL (ADD / EDIT) ───
+class SubjectModal extends Modal {
+  constructor(app, plugin, subject, onSave) {
+    super(app);
+    this.plugin = plugin;
+    this.subject = subject;
+    this.onSave = onSave;
+    this.selectedColor = subject ? (subject.color || '#6366f1') : '#6366f1';
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass('campus-modal-content');
+
+    const isEdit = !!this.subject;
+    contentEl.createEl('h2', {
+      cls: 'campus-modal-title',
+      text: isEdit ? '✏️ Editar Materia' : '📚 Añadir Nueva Materia'
+    });
+
+    const rowName = contentEl.createDiv({ cls: 'campus-form-row' });
+    rowName.createEl('label', { cls: 'campus-form-label', text: 'Nombre de la Materia *' });
+    const nameInput = rowName.createEl('input', {
+      cls: 'campus-form-input',
+      type: 'text',
+      placeholder: 'Ej: Cálculo Integral, Redes de Datos',
+      value: this.subject ? this.subject.name : ''
+    });
+
+    const rowCode = contentEl.createDiv({ cls: 'campus-form-row' });
+    rowCode.createEl('label', { cls: 'campus-form-label', text: 'Código de la Materia (Opcional)' });
+    const codeInput = rowCode.createEl('input', {
+      cls: 'campus-form-input',
+      type: 'text',
+      placeholder: 'Ej: MAT-201',
+      value: this.subject ? (this.subject.code || '') : ''
+    });
+
+    const rowProf = contentEl.createDiv({ cls: 'campus-form-row' });
+    rowProf.createEl('label', { cls: 'campus-form-label', text: 'Profesor / Docente' });
+    const profInput = rowProf.createEl('input', {
+      cls: 'campus-form-input',
+      type: 'text',
+      placeholder: 'Ej: Prof. Carlos Silva',
+      value: this.subject ? (this.subject.professor || '') : ''
+    });
+
+    const rowClass = contentEl.createDiv({ cls: 'campus-form-row' });
+    rowClass.createEl('label', { cls: 'campus-form-label', text: 'Aula / Enlace Virtual' });
+    const classInput = rowClass.createEl('input', {
+      cls: 'campus-form-input',
+      type: 'text',
+      placeholder: 'Ej: Aula 14, Zoom, Google Meet',
+      value: this.subject ? (this.subject.classroom || '') : ''
+    });
+
+    // Color Selector
+    const rowColor = contentEl.createDiv({ cls: 'campus-form-row' });
+    rowColor.createEl('label', { cls: 'campus-form-label', text: 'Color de Identificación' });
+    const colorGrid = rowColor.createDiv({ cls: 'campus-color-picker-grid' });
+
+    COLOR_PALETTE.forEach(c => {
+      const swatch = colorGrid.createDiv({
+        cls: `campus-color-swatch ${this.selectedColor === c.hex ? 'selected' : ''}`
+      });
+      swatch.style.backgroundColor = c.hex;
+      swatch.title = c.name;
+      swatch.addEventListener('click', () => {
+        this.selectedColor = c.hex;
+        colorGrid.querySelectorAll('.campus-color-swatch').forEach(s => s.removeClass('selected'));
+        swatch.addClass('selected');
+      });
+    });
+
+    // Actions
+    const actions = contentEl.createDiv({ cls: 'campus-modal-actions' });
+    const cancelBtn = actions.createEl('button', { cls: 'campus-btn campus-btn-export', text: 'Cancelar' });
+    cancelBtn.addEventListener('click', () => this.close());
+
+    const saveBtn = actions.createEl('button', {
+      cls: 'campus-btn campus-btn-primary',
+      text: isEdit ? 'Guardar Cambios' : 'Crear Materia'
+    });
+
+    saveBtn.addEventListener('click', async () => {
+      const name = nameInput.value.trim();
+      if (!name) {
+        new Notice('El nombre de la materia es obligatorio');
+        return;
+      }
+
+      if (isEdit) {
+        this.subject.name = name;
+        this.subject.code = codeInput.value.trim();
+        this.subject.professor = profInput.value.trim();
+        this.subject.classroom = classInput.value.trim();
+        this.subject.color = this.selectedColor;
+      } else {
+        const newSub = {
+          id: 'sub-' + Date.now(),
+          name,
+          code: codeInput.value.trim(),
+          professor: profInput.value.trim(),
+          classroom: classInput.value.trim(),
+          color: this.selectedColor,
+          collapsed: false,
+          tasks: []
+        };
+        if (!this.plugin.settings.subjects) this.plugin.settings.subjects = [];
+        this.plugin.settings.subjects.push(newSub);
+      }
+
+      await this.plugin.saveSettings();
+      if (this.onSave) this.onSave();
+      new Notice(`📚 Materia "${name}" ${isEdit ? 'actualizada' : 'creada'}`);
+      this.close();
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+// ─── 3. GRADE & WEIGHT MODAL ───
+class GradeModal extends Modal {
+  constructor(app, task, onSave) {
+    super(app);
+    this.task = task;
+    this.onSave = onSave;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass('campus-modal-content');
+
+    contentEl.createEl('h2', { cls: 'campus-modal-title', text: '⭐ Calificación y Ponderación' });
+    contentEl.createEl('p', { cls: 'campus-modal-desc', text: `Ajusta los puntos de: "${this.task.title}"` });
+
+    const rowWeight = contentEl.createDiv({ cls: 'campus-form-row' });
+    rowWeight.createEl('label', { cls: 'campus-form-label', text: 'Ponderación (% de la nota total)' });
+    const weightInput = rowWeight.createEl('input', {
+      cls: 'campus-form-input',
+      type: 'number',
+      min: '0',
+      max: '100',
+      placeholder: 'Ej: 20',
+      value: this.task.weight !== null && this.task.weight !== undefined ? String(this.task.weight) : ''
+    });
+
+    const rowGrade = contentEl.createDiv({ cls: 'campus-form-row' });
+    rowGrade.createEl('label', { cls: 'campus-form-label', text: 'Nota o Calificación Obtenida' });
+    const gradeInput = rowGrade.createEl('input', {
+      cls: 'campus-form-input',
+      type: 'number',
+      step: '0.1',
+      min: '0',
+      placeholder: 'Ej: 18 (o deja vacío si aún no está calificada)',
+      value: this.task.grade !== null && this.task.grade !== undefined ? String(this.task.grade) : ''
+    });
+
+    const actions = contentEl.createDiv({ cls: 'campus-modal-actions' });
+    const clearBtn = actions.createEl('button', { cls: 'campus-btn campus-btn-export', text: 'Quitar Nota' });
+    clearBtn.addEventListener('click', async () => {
+      this.task.grade = null;
+      if (this.onSave) await this.onSave();
+      this.close();
+    });
+
+    const saveBtn = actions.createEl('button', { cls: 'campus-btn campus-btn-primary', text: 'Guardar' });
+    saveBtn.addEventListener('click', async () => {
+      const wVal = weightInput.value.trim();
+      const gVal = gradeInput.value.trim();
+
+      this.task.weight = wVal !== '' ? parseFloat(wVal) : null;
+      this.task.grade = gVal !== '' ? parseFloat(gVal) : null;
+
+      if (this.task.grade !== null) {
+        this.task.completed = true; // Auto-complete if grade is entered
+      }
+
+      if (this.onSave) await this.onSave();
+      this.close();
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+// ─── 4. RESET SEMESTER MODAL (EL BOTÓN DE REINICIO DE CICLO) ───
+class ResetSemesterModal extends Modal {
+  constructor(app, plugin, onDone) {
+    super(app);
+    this.plugin = plugin;
+    this.onDone = onDone;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass('campus-modal-content');
+
+    contentEl.createEl('h2', { cls: 'campus-modal-title', text: '🔄 Finalizar Ciclo & Nuevo Semestre' });
+
+    // Warning Banner
+    const warnBox = contentEl.createDiv({ cls: 'campus-warning-box' });
+    const warnTitle = warnBox.createDiv({ cls: 'campus-warning-box-title' });
+    warnTitle.innerHTML = `${svgIcon('reset')} <span>Transición de Semestre</span>`;
+    const warnText = warnBox.createDiv({ cls: 'campus-warning-box-text' });
+    warnText.setText('Al pasar de semestre, inicias con nuevas materias y tareas. Este asistente exportará tu historial actual de forma segura para que no pierdas ningún apunte.');
+
+    // Auto-backup toggle
+    const rowBackup = contentEl.createDiv({ cls: 'campus-form-row' });
+    const labelBackup = rowBackup.createEl('label', {
+      cls: 'campus-form-label',
+      style: 'display: flex; align-items: center; gap: 8px; cursor: pointer;'
+    });
+    const backupCheck = labelBackup.createEl('input', { type: 'checkbox' });
+    backupCheck.checked = true;
+    labelBackup.createSpan({ text: 'Guardar y archivar nota de respaldo del semestre actual antes de limpiar' });
+
+    // Next Semester Name Input
+    const currentSem = this.plugin.settings.currentSemester || 'Semestre 2026-I';
+    let suggestedNext = currentSem;
+    if (currentSem.includes('-I')) suggestedNext = currentSem.replace('-I', '-II');
+    else if (currentSem.includes('-1')) suggestedNext = currentSem.replace('-1', '-2');
+    else if (currentSem.includes('2026-II')) suggestedNext = 'Semestre 2027-I';
+    else suggestedNext = currentSem + ' (Nuevo)';
+
+    const rowNextSem = contentEl.createDiv({ cls: 'campus-form-row' });
+    rowNextSem.createEl('label', { cls: 'campus-form-label', text: 'Nombre del Próximo Semestre' });
+    const nextSemInput = rowNextSem.createEl('input', {
+      cls: 'campus-form-input',
+      type: 'text',
+      value: suggestedNext
+    });
+
+    // Reset Mode
+    const rowMode = contentEl.createDiv({ cls: 'campus-form-row' });
+    rowMode.createEl('label', { cls: 'campus-form-label', text: '¿Cómo deseas configurar las materias?' });
+    const modeSelect = rowMode.createEl('select', { cls: 'campus-form-select' });
+
+    const opt1 = modeSelect.createEl('option', {
+      value: 'wipe_all',
+      text: 'Borrar todo (Materias y tareas desde cero para el nuevo semestre)'
+    });
+    const opt2 = modeSelect.createEl('option', {
+      value: 'keep_subjects',
+      text: 'Conservar los nombres de materias pero vaciar todas sus tareas'
+    });
+
+    // Actions
+    const actions = contentEl.createDiv({ cls: 'campus-modal-actions' });
+    const cancelBtn = actions.createEl('button', { cls: 'campus-btn campus-btn-export', text: 'Cancelar' });
+    cancelBtn.addEventListener('click', () => this.close());
+
+    const confirmBtn = actions.createEl('button', {
+      cls: 'campus-btn campus-btn-reset',
+      text: 'Confirmar & Comenzar Nuevo Semestre'
+    });
+
+    confirmBtn.addEventListener('click', async () => {
+      const nextSem = nextSemInput.value.trim() || 'Nuevo Semestre';
+
+      // 1. Auto-backup if selected
+      if (backupCheck.checked) {
+        await this.plugin.exportSemesterToVault(true); // true = archive mode
+      }
+
+      // 2. Save into completedSemestersArchive array
+      if (!this.plugin.settings.completedSemestersArchive) {
+        this.plugin.settings.completedSemestersArchive = [];
+      }
+      this.plugin.settings.completedSemestersArchive.push({
+        semester: this.plugin.settings.currentSemester,
+        archivedAt: new Date().toISOString(),
+        subjectsSnapshot: JSON.parse(JSON.stringify(this.plugin.settings.subjects || []))
+      });
+
+      // 3. Reset subjects according to mode
+      if (modeSelect.value === 'wipe_all') {
+        this.plugin.settings.subjects = [];
+      } else {
+        // keep subjects, clear tasks
+        for (const s of this.plugin.settings.subjects || []) {
+          s.tasks = [];
+        }
+      }
+
+      // 4. Update semester
+      this.plugin.settings.currentSemester = nextSem;
+      await this.plugin.saveSettings();
+
+      if (this.onDone) this.onDone();
+      new Notice(`🚀 ¡Nuevo ciclo iniciado! Bienvenido a ${nextSem}`);
+      this.close();
+    });
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// SETTINGS TAB
+// ══════════════════════════════════════════════════════════════════════════
+class CampusUniversitySettingTab extends PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+  }
+
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+
+    containerEl.createEl('h2', { text: 'Campus OS - Configuración Universitaria' });
+
+    new Setting(containerEl)
+      .setName(t('univNameLabel'))
+      .setDesc(t('univNameDesc'))
+      .addText(text => text
+        .setPlaceholder('Campus University')
+        .setValue(this.plugin.settings.universityName)
+        .onChange(async val => {
+          this.plugin.settings.universityName = val.trim() || 'Campus University';
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName(t('shortNameLabel'))
+      .setDesc(t('shortNameDesc'))
+      .addText(text => text
+        .setPlaceholder('CAMPUS')
+        .setValue(this.plugin.settings.shortName)
+        .onChange(async val => {
+          this.plugin.settings.shortName = val.trim() || 'CAMPUS';
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName(t('careerLabel'))
+      .setDesc(t('careerDesc'))
+      .addText(text => text
+        .setPlaceholder('Computer Science')
+        .setValue(this.plugin.settings.career)
+        .onChange(async val => {
+          this.plugin.settings.career = val.trim() || '';
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('Semestre Actual')
+      .setDesc('El ciclo académico en curso.')
+      .addText(text => text
+        .setPlaceholder('Semestre 2026-II')
+        .setValue(this.plugin.settings.currentSemester)
+        .onChange(async val => {
+          this.plugin.settings.currentSemester = val.trim() || 'Semestre Actual';
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
+      .setName('Carpeta para Exportaciones')
+      .setDesc('Ruta en tu Vault donde se crearán las notas de exportación de semestre.')
+      .addText(text => text
+        .setPlaceholder('Universidad/Semestres')
+        .setValue(this.plugin.settings.exportFolder)
+        .onChange(async val => {
+          this.plugin.settings.exportFolder = val.trim() || 'Universidad/Semestres';
+          await this.plugin.saveSettings();
+        }));
+
+    containerEl.createEl('h3', { text: 'Historial y Mantenimiento' });
+
+    const archiveCount = (this.plugin.settings.completedSemestersArchive || []).length;
+    new Setting(containerEl)
+      .setName('Semestres Archivados')
+      .setDesc(`Tienes ${archiveCount} semestre(s) guardados en el histórico.`)
+      .addButton(btn => btn
+        .setButtonText('Exportar Semestre Ahora')
+        .onClick(async () => {
+          await this.plugin.exportSemesterToVault();
+        }));
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// OBSIDIAN PLUGIN LIFECYCLE
+// ══════════════════════════════════════════════════════════════════════════
+class CampusUniversityPlugin extends Plugin {
+  async onload() {
+    await this.loadSettings();
+
+    // Register View
+    this.registerView(
+      VIEW_TYPE_UNIVERSITY,
+      (leaf) => new CampusUniversityView(leaf, this)
+    );
+
+    // Left Ribbon Icon
+    this.addRibbonIcon('graduation-cap', 'Campus OS - Gestor Universitario', () => {
+      this.activateView();
+    });
+
+    // Commands in Command Palette
+    this.addCommand({
+      id: 'open-university-tracker',
+      name: 'Abrir Gestor Universitario (Campus OS)',
+      callback: () => {
+        this.activateView();
+      }
+    });
+
+    this.addCommand({
+      id: 'export-semester-markdown',
+      name: 'Exportar Semestre Actual a Documento Markdown',
+      callback: async () => {
+        await this.exportSemesterToVault();
+      }
+    });
+
+    this.addCommand({
+      id: 'reset-semester-cycle',
+      name: 'Reiniciar Ciclo / Iniciar Nuevo Semestre',
+      callback: () => {
+        new ResetSemesterModal(this.app, this, () => {
+          this.refreshViews();
+        }).open();
+      }
+    });
+
+    // Setting Tab
+    this.addSettingTab(new CampusUniversitySettingTab(this.app, this));
+  }
+
+  async onunload() {
+    this.app.workspace.detachLeavesOfType(VIEW_TYPE_UNIVERSITY);
+  }
+
+  async loadSettings() {
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+  }
+
+  async saveSettings() {
+    await this.saveData(this.settings);
+  }
+
+  refreshViews() {
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_UNIVERSITY);
+    for (const leaf of leaves) {
+      if (leaf.view && typeof leaf.view.render === 'function') {
+        leaf.view.render();
+      }
+    }
+  }
+
+  async activateView() {
+    const { workspace } = this.app;
+    let leaf = null;
+    const leaves = workspace.getLeavesOfType(VIEW_TYPE_UNIVERSITY);
+
+    if (leaves.length > 0) {
+      leaf = leaves[0];
+    } else {
+      leaf = workspace.getLeaf(true);
+      await leaf.setViewState({ type: VIEW_TYPE_UNIVERSITY, active: true });
+    }
+
+    workspace.revealLeaf(leaf);
+  }
+
+  // ─── VAULT EXPORT ENGINE ───
+  async exportSemesterToVault(isArchive = false) {
+    try {
+      const folderPath = isArchive
+        ? (this.settings.archiveFolder || 'Universidad/Historico')
+        : (this.settings.exportFolder || 'Universidad/Semestres');
+
+      // Create folder recursively if missing
+      await this.ensureFolderExists(folderPath);
+
+      const uniShort = sanitizeFileName(this.settings.shortName || 'Uni');
+      const semShort = sanitizeFileName(this.settings.currentSemester || 'Semestre');
+      const dateStr = new Date().toISOString().split('T')[0];
+
+      const prefix = isArchive ? 'HISTORICO - ' : 'RESUMEN - ';
+      const fileName = `${prefix}[${uniShort}] ${semShort} - ${dateStr}.md`;
+      const fullPath = `${folderPath}/${fileName}`;
+
+      const markdownContent = buildSemesterMarkdown(this.settings);
+
+      // Check if file exists
+      const existingFile = this.app.vault.getAbstractFileByPath(fullPath);
+      let targetFile;
+
+      if (existingFile) {
+        await this.app.vault.modify(existingFile, markdownContent);
+        targetFile = existingFile;
+      } else {
+        targetFile = await this.app.vault.create(fullPath, markdownContent);
+      }
+
+      new Notice(`📄 Semestre exportado con éxito a: "${fileName}"`);
+
+      // Open the exported file in a new tab if not an archive background task
+      if (!isArchive && targetFile) {
+        await this.app.workspace.openLinkText(fullPath, '', true);
+      }
+
+      return targetFile;
+    } catch (err) {
+      console.error('Error exporting semester to vault:', err);
+      new Notice(`❌ Error al exportar semestre: ${err.message || err}`);
+    }
+  }
+
+  async ensureFolderExists(folderPath) {
+    const parts = folderPath.split('/').filter(p => p.trim() !== '');
+    let current = '';
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      const exists = this.app.vault.getAbstractFileByPath(current);
+      if (!exists) {
+        try {
+          await this.app.vault.createFolder(current);
+        } catch (e) {
+          // ignore folder already exists race
+        }
+      }
+    }
+  }
+}
+
+module.exports = CampusUniversityPlugin;
+module.exports.default = CampusUniversityPlugin;

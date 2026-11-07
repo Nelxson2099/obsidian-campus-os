@@ -1,0 +1,24 @@
+{
+  "name": "obsidian-university",
+  "version": "1.0.0",
+  "description": "Campus OS - University semester, courses, checklist, and academic progress manager for Obsidian.",
+  "main": "main.js",
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "university",
+    "academic",
+    "student",
+    "productivity",
+    "campus"
+  ],
+  "author": "Nelxson2099",
+  "license": "MIT",
+  "devDependencies": {
+    "esbuild": "^0.21.0",
+    "obsidian": "^1.5.0"
+  },
+  "scripts": {
+    "build": "node esbuild.config.mjs production"
+  }
+}
