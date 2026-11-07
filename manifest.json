@@ -1,9 +1,9 @@
 {
   "id": "campus-os",
   "name": "Campus OS",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minAppVersion": "0.15.0",
-  "description": "Academic & university semester manager for Obsidian: subjects, checklist tasks, Markdown semester exports, and cycle reset.",
+  "description": "Comprehensive academic & university manager: subjects, checklist tasks, Markdown semester reports, and cycle reset.",
   "author": "Nelxson2099",
   "authorUrl": "https://github.com/Nelxson2099",
   "isDesktopOnly": false

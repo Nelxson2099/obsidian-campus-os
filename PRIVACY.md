@@ -28,3 +28,4 @@ You have complete control over your academic data:
 ## 4. Contact
 For questions or feedback, open an issue at:
 https://github.com/Nelxson2099/obsidian-campus-os
+

@@ -43,3 +43,4 @@ Campus OS is 100% **Local-First**. Your courses, grades, homework, and academic 
 ## 📄 License
 
 Released under the [MIT License](LICENSE). Built with excellence by **[Nelxson2099](https://github.com/Nelxson2099)**.
+

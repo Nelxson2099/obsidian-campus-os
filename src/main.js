@@ -28,7 +28,11 @@ const COLOR_PALETTE = [
 ];
 
 // ─── i18n LOCALIZATION ENGINE (EN / ES) ───
-const USER_LOCALE = (typeof window !== 'undefined' && window.localStorage && window.localStorage.getItem('language') || 'en').toLowerCase();
+const USER_LOCALE = (typeof window !== 'undefined' && (
+  (window.moment && typeof window.moment.locale === 'function' && window.moment.locale()) ||
+  (navigator && navigator.language) ||
+  'en'
+)).toLowerCase();
 const IS_ES = USER_LOCALE.startsWith('es');
 
 const I18N = {
