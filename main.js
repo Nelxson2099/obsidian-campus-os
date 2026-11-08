@@ -367,7 +367,8 @@ var CampusUniversityView = class extends ItemView {
     this.render();
   }
   render() {
-    const root = this.contentEl || this.containerEl.children && this.containerEl.children[1] || this.containerEl;
+    const root = this.containerEl && this.containerEl.children && this.containerEl.children[1] || this.contentEl || this.containerEl;
+    const prevScroll = root ? root.scrollTop : 0;
     root.empty();
     root.addClass("campus-os-view");
     if (this.containerEl) {
@@ -472,11 +473,37 @@ var CampusUniversityView = class extends ItemView {
         this.renderSubjectsList(container.querySelector(".campus-subjects-list"));
       });
     });
+    const toggleAllBtn = toolbar.createEl("button", {
+      cls: "campus-filter-btn",
+      title: "Expandir o colapsar todas las materias"
+    });
+    const updateToggleAllText = () => {
+      const anyCollapsed = (settings.subjects || []).some((s) => s.collapsed);
+      toggleAllBtn.setText(anyCollapsed ? "\u2195 Expandir Todo" : "\u2195 Colapsar Todo");
+    };
+    updateToggleAllText();
+    toggleAllBtn.addEventListener("click", async () => {
+      const anyCollapsed = (settings.subjects || []).some((s) => s.collapsed);
+      (settings.subjects || []).forEach((s) => s.collapsed = !anyCollapsed);
+      await this.plugin.saveSettings();
+      updateToggleAllText();
+      this.renderSubjectsList(container.querySelector(".campus-subjects-list"));
+    });
     const subjectsContainer = container.createDiv({ cls: "campus-subjects-list" });
     this.renderSubjectsList(subjectsContainer);
+    if (prevScroll > 0) {
+      root.scrollTop = prevScroll;
+      requestAnimationFrame(() => {
+        if (root && root.scrollTop !== prevScroll) {
+          root.scrollTop = prevScroll;
+        }
+      });
+    }
   }
   renderSubjectsList(containerEl) {
     if (!containerEl) return;
+    const scrollEl = containerEl.closest(".campus-os-view") || containerEl.parentElement;
+    const prevScroll = scrollEl ? scrollEl.scrollTop : 0;
     containerEl.empty();
     const settings = this.plugin.settings;
     const subjects = settings.subjects || [];
@@ -554,114 +581,136 @@ var CampusUniversityView = class extends ItemView {
       });
       const chevronBtn = actions.createEl("button", { cls: "campus-icon-btn" });
       chevronBtn.innerHTML = subject.collapsed ? svgIcon("chevron-right") : svgIcon("chevron-down");
-      header.addEventListener("click", async () => {
+      header.addEventListener("click", async (e) => {
+        if (e.target.closest(".campus-icon-btn") && !e.target.closest(".campus-icon-btn:last-child")) {
+          return;
+        }
         subject.collapsed = !subject.collapsed;
         await this.plugin.saveSettings();
-        this.renderSubjectsList(containerEl);
+        chevronBtn.innerHTML = subject.collapsed ? svgIcon("chevron-right") : svgIcon("chevron-down");
+        const existingBody = card.querySelector(".campus-subject-body");
+        if (subject.collapsed) {
+          if (existingBody) existingBody.remove();
+        } else {
+          if (!existingBody) {
+            this.renderSubjectBody(card, subject, tasks, allSubTasks, subIndex);
+          }
+        }
       });
       if (!subject.collapsed) {
-        const body = card.createDiv({ cls: "campus-subject-body" });
-        const quickAdd = body.createDiv({ cls: "campus-quick-add-task" });
-        const taskInput = quickAdd.createEl("input", {
-          cls: "campus-task-input",
-          type: "text",
-          placeholder: `+ Nueva tarea o examen para ${subject.name}...`
-        });
-        const typeSelect = quickAdd.createEl("select", { cls: "campus-task-select" });
-        ["tarea", "examen", "proyecto", "exposicion", "taller", "otro"].forEach((t2) => {
-          const opt = typeSelect.createEl("option", { value: t2, text: t2.charAt(0).toUpperCase() + t2.slice(1) });
-        });
-        const dateInput = quickAdd.createEl("input", { cls: "campus-task-date-input", type: "date" });
-        const addBtn = quickAdd.createEl("button", { cls: "campus-add-task-btn", text: "A\xF1adir" });
-        const handleAddTask = async () => {
-          const title = taskInput.value.trim();
-          if (!title) {
-            new Notice("Ingresa el t\xEDtulo de la tarea");
-            return;
-          }
-          const newTask = {
-            id: "tsk-" + Date.now(),
-            title,
-            type: typeSelect.value,
-            dueDate: dateInput.value || "",
-            weight: null,
-            grade: null,
-            completed: false
-          };
-          if (!subject.tasks) subject.tasks = [];
-          subject.tasks.push(newTask);
-          await this.plugin.saveSettings();
-          this.render();
-          new Notice(`\u2705 Tarea a\xF1adida a ${subject.name}`);
-        };
-        addBtn.addEventListener("click", handleAddTask);
-        taskInput.addEventListener("keydown", (e) => {
-          if (e.key === "Enter") handleAddTask();
-        });
-        const tasksContainer = body.createDiv({ cls: "campus-tasks-container" });
-        if (tasks.length === 0) {
-          tasksContainer.createDiv({
-            cls: "campus-empty-tasks",
-            text: allSubTasks.length === 0 ? "Sin tareas creadas todav\xEDa. A\xF1ade la primera arriba." : "No hay tareas que coincidan con el filtro actual."
-          });
-        } else {
-          tasks.forEach((task) => {
-            const taskItem = tasksContainer.createDiv({
-              cls: `campus-task-item ${task.completed ? "completed" : ""}`
-            });
-            const taskLeft = taskItem.createDiv({ cls: "campus-task-left" });
-            const checkbox = taskLeft.createDiv({
-              cls: `campus-checkbox-custom ${task.completed ? "checked" : ""}`
-            });
-            checkbox.innerHTML = svgIcon("check");
-            checkbox.title = task.completed ? "Marcar como pendiente" : "Tachar como completada";
-            checkbox.addEventListener("click", async (e) => {
-              e.stopPropagation();
-              task.completed = !task.completed;
-              task.completedAt = task.completed ? (/* @__PURE__ */ new Date()).toISOString() : null;
-              await this.plugin.saveSettings();
-              this.render();
-            });
-            const titleGroup = taskLeft.createDiv({ cls: "campus-task-title-group" });
-            const titleEl = titleGroup.createDiv({ cls: "campus-task-title", text: task.title });
-            const taskRight = taskItem.createDiv({ cls: "campus-task-right" });
-            const typeBadge = taskRight.createDiv({
-              cls: `campus-badge-type type-${task.type || "tarea"}`,
-              text: task.type || "tarea"
-            });
-            const urgency = getUrgencyInfo(task.dueDate, task.completed);
-            if (task.dueDate || task.completed) {
-              const dueBadge = taskRight.createDiv({
-                cls: `campus-badge-due ${urgency.cls}`,
-                text: urgency.text
-              });
-            }
-            const gradeBadge = taskRight.createDiv({
-              cls: `campus-badge-grade ${typeof task.grade === "number" ? "" : "no-grade"}`,
-              text: typeof task.grade === "number" ? `Nota: ${task.grade}${task.weight ? ` (${task.weight}%)` : ""}` : task.weight ? `${task.weight}%` : "+ Calificar"
-            });
-            gradeBadge.title = "Haz clic para asignar o editar la calificaci\xF3n/ponderaci\xF3n";
-            gradeBadge.addEventListener("click", () => {
-              new GradeModal(this.app, task, async () => {
-                await this.plugin.saveSettings();
-                this.render();
-              }).open();
-            });
-            const delTaskBtn = taskRight.createEl("button", { cls: "campus-icon-btn danger" });
-            delTaskBtn.innerHTML = svgIcon("trash");
-            delTaskBtn.title = "Eliminar tarea";
-            delTaskBtn.addEventListener("click", async () => {
-              const idx = subject.tasks.indexOf(task);
-              if (idx >= 0) {
-                subject.tasks.splice(idx, 1);
-                await this.plugin.saveSettings();
-                this.render();
-              }
-            });
-          });
-        }
+        this.renderSubjectBody(card, subject, tasks, allSubTasks, subIndex);
       }
     });
+    if (prevScroll > 0 && scrollEl) {
+      scrollEl.scrollTop = prevScroll;
+      requestAnimationFrame(() => {
+        if (scrollEl && scrollEl.scrollTop !== prevScroll) {
+          scrollEl.scrollTop = prevScroll;
+        }
+      });
+    }
+  }
+  renderSubjectBody(card, subject, tasks, allSubTasks, subIndex) {
+    const body = card.createDiv({ cls: "campus-subject-body" });
+    const quickAdd = body.createDiv({ cls: "campus-quick-add-task" });
+    const taskInput = quickAdd.createEl("input", {
+      cls: "campus-task-input",
+      type: "text",
+      placeholder: `+ Nueva tarea o examen para ${subject.name}...`
+    });
+    const typeSelect = quickAdd.createEl("select", { cls: "campus-task-select" });
+    ["tarea", "examen", "proyecto", "exposicion", "taller", "otro"].forEach((t2) => {
+      const opt = typeSelect.createEl("option", { value: t2, text: t2.charAt(0).toUpperCase() + t2.slice(1) });
+    });
+    const dateInput = quickAdd.createEl("input", { cls: "campus-task-date-input", type: "date" });
+    const addBtn = quickAdd.createEl("button", { cls: "campus-add-task-btn", text: "A\xF1adir" });
+    const handleAddTask = async () => {
+      const title = taskInput.value.trim();
+      if (!title) {
+        new Notice("Ingresa el t\xEDtulo de la tarea");
+        return;
+      }
+      const newTask = {
+        id: "tsk-" + Date.now(),
+        title,
+        type: typeSelect.value,
+        dueDate: dateInput.value || "",
+        weight: null,
+        grade: null,
+        completed: false
+      };
+      if (!subject.tasks) subject.tasks = [];
+      subject.tasks.push(newTask);
+      await this.plugin.saveSettings();
+      this.render();
+      new Notice(`\u2705 Tarea a\xF1adida a ${subject.name}`);
+    };
+    addBtn.addEventListener("click", handleAddTask);
+    taskInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") handleAddTask();
+    });
+    const tasksContainer = body.createDiv({ cls: "campus-tasks-container" });
+    if (tasks.length === 0) {
+      tasksContainer.createDiv({
+        cls: "campus-empty-tasks",
+        text: allSubTasks.length === 0 ? "Sin tareas creadas todav\xEDa. A\xF1ade la primera arriba." : "No hay tareas que coincidan con el filtro actual."
+      });
+    } else {
+      tasks.forEach((task) => {
+        const taskItem = tasksContainer.createDiv({
+          cls: `campus-task-item ${task.completed ? "completed" : ""}`
+        });
+        const taskLeft = taskItem.createDiv({ cls: "campus-task-left" });
+        const checkbox = taskLeft.createDiv({
+          cls: `campus-checkbox-custom ${task.completed ? "checked" : ""}`
+        });
+        checkbox.innerHTML = svgIcon("check");
+        checkbox.title = task.completed ? "Marcar como pendiente" : "Tachar como completada";
+        checkbox.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          task.completed = !task.completed;
+          task.completedAt = task.completed ? (/* @__PURE__ */ new Date()).toISOString() : null;
+          await this.plugin.saveSettings();
+          this.render();
+        });
+        const titleGroup = taskLeft.createDiv({ cls: "campus-task-title-group" });
+        titleGroup.createDiv({ cls: "campus-task-title", text: task.title });
+        const taskRight = taskItem.createDiv({ cls: "campus-task-right" });
+        taskRight.createDiv({
+          cls: `campus-badge-type type-${task.type || "tarea"}`,
+          text: task.type || "tarea"
+        });
+        const urgency = getUrgencyInfo(task.dueDate, task.completed);
+        if (task.dueDate || task.completed) {
+          taskRight.createDiv({
+            cls: `campus-badge-due ${urgency.cls}`,
+            text: urgency.text
+          });
+        }
+        const gradeBadge = taskRight.createDiv({
+          cls: `campus-badge-grade ${typeof task.grade === "number" ? "" : "no-grade"}`,
+          text: typeof task.grade === "number" ? `Nota: ${task.grade}${task.weight ? ` (${task.weight}%)` : ""}` : task.weight ? `${task.weight}%` : "+ Calificar"
+        });
+        gradeBadge.title = "Haz clic para asignar o editar la calificaci\xF3n/ponderaci\xF3n";
+        gradeBadge.addEventListener("click", () => {
+          new GradeModal(this.app, task, async () => {
+            await this.plugin.saveSettings();
+            this.render();
+          }).open();
+        });
+        const delTaskBtn = taskRight.createEl("button", { cls: "campus-icon-btn danger" });
+        delTaskBtn.innerHTML = svgIcon("trash");
+        delTaskBtn.title = "Eliminar tarea";
+        delTaskBtn.addEventListener("click", async () => {
+          const idx = subject.tasks.indexOf(task);
+          if (idx >= 0) {
+            subject.tasks.splice(idx, 1);
+            await this.plugin.saveSettings();
+            this.render();
+          }
+        });
+      });
+    }
   }
 };
 var EditUniversityModal = class extends Modal {

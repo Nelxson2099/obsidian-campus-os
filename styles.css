@@ -4,21 +4,21 @@
    ══════════════════════════════════════════════════════════════════════════ */
 
 /* ─── SCROLLABLE ROOT & CONTAINER ─── */
-.workspace-leaf-content[data-type="campus-os-university-view"],
-.workspace-leaf-content[data-type="campus-os-university-view"] .view-content,
 .campus-os-view {
+  padding: 0;
   height: 100%;
-  max-height: 100%;
   width: 100%;
   overflow-y: auto;
   overflow-x: hidden;
   box-sizing: border-box;
   scroll-behavior: smooth;
   background-color: var(--background-primary);
+  color: var(--text-normal);
+  font-family: var(--font-interface);
 }
 
 .campus-os-container {
-  padding: 20px 24px 120px 24px;
+  padding: 20px 24px 180px 24px;
   max-width: 1040px;
   margin: 0 auto;
   font-family: var(--font-interface, system-ui, -apple-system, sans-serif);
