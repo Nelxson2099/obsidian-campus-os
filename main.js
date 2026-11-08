@@ -367,14 +367,26 @@ var CampusUniversityView = class extends ItemView {
     this.render();
   }
   render() {
-    const root = this.containerEl && this.containerEl.children && this.containerEl.children[1] || this.contentEl || this.containerEl;
-    const prevScroll = root ? root.scrollTop : 0;
-    root.empty();
-    root.addClass("campus-os-view");
+    let scrollEl = null;
+    if (this.containerEl && this.containerEl.children && this.containerEl.children.length > 1) {
+      scrollEl = this.containerEl.children[1];
+    } else if (this.contentEl && this.contentEl !== this.containerEl) {
+      scrollEl = this.contentEl;
+    } else if (this.containerEl) {
+      scrollEl = this.containerEl.querySelector(".view-content");
+      if (!scrollEl) {
+        scrollEl = this.containerEl.createDiv({ cls: "view-content" });
+      }
+    }
+    if (!scrollEl) scrollEl = this.containerEl;
     if (this.containerEl) {
+      this.containerEl.addClass("campus-os-root");
       this.containerEl.removeClass("campus-os-container");
     }
-    const container = root.createDiv({ cls: "campus-os-container" });
+    const prevScroll = scrollEl.scrollTop || (this.containerEl ? this.containerEl.scrollTop : 0);
+    scrollEl.empty();
+    scrollEl.addClass("campus-os-view");
+    const container = scrollEl.createDiv({ cls: "campus-os-container" });
     const settings = this.plugin.settings;
     const metrics = calculateMetrics(settings.subjects);
     const banner = container.createDiv({ cls: "campus-hero-banner" });
@@ -492,12 +504,8 @@ var CampusUniversityView = class extends ItemView {
     const subjectsContainer = container.createDiv({ cls: "campus-subjects-list" });
     this.renderSubjectsList(subjectsContainer);
     if (prevScroll > 0) {
-      root.scrollTop = prevScroll;
-      requestAnimationFrame(() => {
-        if (root && root.scrollTop !== prevScroll) {
-          root.scrollTop = prevScroll;
-        }
-      });
+      if (scrollEl) scrollEl.scrollTop = prevScroll;
+      if (this.containerEl && this.containerEl !== scrollEl) this.containerEl.scrollTop = prevScroll;
     }
   }
   renderSubjectsList(containerEl) {
@@ -603,11 +611,6 @@ var CampusUniversityView = class extends ItemView {
     });
     if (prevScroll > 0 && scrollEl) {
       scrollEl.scrollTop = prevScroll;
-      requestAnimationFrame(() => {
-        if (scrollEl && scrollEl.scrollTop !== prevScroll) {
-          scrollEl.scrollTop = prevScroll;
-        }
-      });
     }
   }
   renderSubjectBody(card, subject, tasks, allSubTasks, subIndex) {
